@@ -191,6 +191,14 @@ app.layout = html.Div([
                     href='/appointment-analysis',
                     style={'text-decoration': 'none', 'color': '#fff', 'padding': '12px 20px', 'border-radius': '5px', 'display': 'flex', 'width': '80%', 'background-color': '#555', 'margin-bottom': '10px'}
                 ),
+                dcc.Link(
+                    html.Div([
+                        html.I(className="fa fa-calendar-check", style={'font-size': '20px', 'margin-right': '10px'}),
+                        'Registration Analysis'
+                    ], style={'display': 'flex', 'align-items': 'center'}),
+                    href='/registration',
+                    style={'text-decoration': 'none', 'color': '#fff', 'padding': '12px 20px', 'border-radius': '5px', 'display': 'flex', 'width': '80%', 'background-color': '#555', 'margin-bottom': '10px'}
+                ),
             ], style={'margin-top': '30px'}),  # Adding margin-top to space out links
         ], style={
             'backgroundColor': '#333',  # Sidebar color
@@ -586,12 +594,12 @@ def appointment_analysis_page():
 
         # Graphs
         dcc.Graph(id='days-to-appointment-histogram'),
-        dcc.Graph(id='avg-days-to-appointment-line')
+        dcc.Graph(id='average-days-to-appointment-line')
     ])
 
 @app.callback(
     [Output('days-to-appointment-histogram', 'figure'),
-     Output('avg-days-to-appointment-line', 'figure')],
+     Output('average-days-to-appointment-line', 'figure')],
     Input('appointment-date-picker', 'start_date'),
     Input('appointment-date-picker', 'end_date')
 )
@@ -623,6 +631,114 @@ def update_appointment_graphs(start_date, end_date):
 
     return histogram_fig, line_fig
 
+
+# ----------------- Page 4: Registration Analysis -----------------
+user['registered_date'] = pd.to_datetime(appointment['cdate'], format='%d-%m-%Y %H:%M', dayfirst=True)
+appointment = appointment.merge(user[['user_id', 'registered_date']], on='user_id', how='left')
+
+appointment['days_to_appointment'] = (appointment['appointment_date'] - appointment['registered_date']).dt.days
+
+appointment = appointment[appointment['days_to_appointment'].notnull() & (appointment['days_to_appointment'] >= 0)]
+appointment['appointment_index'] = appointment.groupby('user_id').cumcount() + 1
+appointment = appointment.sort_values(by=['user_id', 'appointment_date'])
+appointment['days_between_appointments'] = appointment.groupby('user_id')['appointment_date'].diff().dt.days
+appointment_gap_summary = (
+    appointment
+    .groupby('appointment_index')
+    .agg(
+        avg_days_between_appointments=('days_between_appointments', 'mean'),
+        appointment_count=('appointment_id', 'count')
+    )
+    .reset_index()
+)
+
+def registrations():
+    return html.Div([
+    html.H1("Registration & Consecutive Appointment Analysis", style={'textAlign': 'center'}),
+
+    # Dropdown to filter by Registration Quarter
+    html.Label("Select Registration Quarter:"),
+    dcc.Dropdown(
+        id='quarter-dropdown',
+        options=[
+            {'label': str(quarter), 'value': str(quarter)}
+            for quarter in appointment['registered_date'].dt.to_period('Q').unique()
+        ],
+        value=None,
+        placeholder="Select a Quarter"
+    ),
+
+    # Graph for Days to Appointment Distribution
+    dcc.Graph(id='days-of-appointment-histogram'),
+
+    # Graph for Average Days to Appointment Over Quarters
+    dcc.Graph(id='avg-days-to-appointment-line'),
+
+    # Graph for Consecutive Appointment Gaps
+    dcc.Graph(id='avg-days-between-appointments-line'),
+
+    # Display Aggregated Metrics
+    html.Div(id='appointment-gap-metrics', style={'margin-top': '20px', 'textAlign': 'center'})
+])
+@app.callback(
+    [
+        Output('days-of-appointment-histogram', 'figure'),
+        Output('avg-days-to-appointment-line', 'figure'),
+        Output('avg-days-between-appointments-line', 'figure'),
+        Output('appointment-gap-metrics', 'children')
+    ],
+    [Input('quarter-dropdown', 'value')]
+)
+def update_all_figures(selected_quarter):
+    # Filter data based on selected quarter
+    filtered_data = (
+        appointment[appointment['registered_date'].dt.to_period('Q') == selected_quarter]
+        if selected_quarter
+        else appointment
+    )
+
+    # Create histogram
+    histogram_fig = px.histogram(
+        filtered_data,
+        x='days_to_appointment',
+        nbins=30,
+        title="Distribution of Days Between Registration and Appointment",
+        color_discrete_sequence=['#636EFA']
+    )
+
+    # Create line chart for average days to appointment
+    avg_days_summary = (
+        filtered_data
+        .groupby(filtered_data['registered_date'].dt.to_period('M'))
+        .agg(avg_days_to_appointment=('days_to_appointment', 'mean'))
+        .reset_index()
+    )
+    avg_days_fig = px.line(
+        avg_days_summary,
+        x=avg_days_summary['registered_date'].dt.to_timestamp(),  # Ensure compatibility
+        y='avg_days_to_appointment',
+        title="Average Days to Appointment Over Time",
+        markers=True
+    )
+
+    # Create line chart for gaps between appointments
+    gap_fig = px.line(
+        appointment_gap_summary,
+        x='appointment_index',
+        y='avg_days_between_appointments',
+        title='Average Days Between Consecutive Appointments',
+        markers=True
+    )
+
+    # Display metrics
+    avg_gap = filtered_data['days_to_appointment'].mean()
+    total_appointments = filtered_data['appointment_id'].nunique()
+    total_customers = filtered_data['user_id'].nunique()
+    metrics = f"Avg Days to Appointment: {avg_gap:.2f} | Total Appointments: {total_appointments} | Total Customers: {total_customers}"
+
+    return histogram_fig, avg_days_fig, gap_fig, metrics
+
+
 # ----------------- Page Callback -----------------
 @app.callback(
     Output('page-content', 'children'),
@@ -633,6 +749,8 @@ def display_page(pathname):
         return user_status_page()
     elif pathname == '/appointment-analysis':
         return appointment_analysis_page()
+    elif pathname == '/registration':
+        return registrations()
     else:
         return home_page()
 
