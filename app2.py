@@ -10,7 +10,18 @@ appointment = pd.read_csv(
     r'appointment_list.csv',
     low_memory=False
 )
-
+STATUS_MAPPING = {
+    'N': 'Not Assigned',
+    'D': 'Assigned',
+    'O': 'On-the-Way',
+    'W': 'In-Progress',
+    'C': 'Cancelled',
+    'S': 'Completed',
+    'F': 'Failure',
+    'R': 'Rejected',
+    'L': 'Rescheduled',
+    'P': 'Paid'
+}
 # Ensure appointment_date is in datetime format
 appointment['appointment_date'] = pd.to_datetime(appointment['cdate'], format='%d-%m-%Y %H:%M', dayfirst=True)
 
@@ -90,6 +101,46 @@ app.index_string = '''
                 padding: 0;
                 background-color: #f4f4f4;
             }
+            button.export {
+            background-color: rgba(68, 68, 68, 0.7);
+            border: 1px solid transparent;
+            border-radius: 3px;
+            box-shadow: rgba(255, 255, 255, .4) 0 1px 0 0 inset;
+            box-sizing: border-box;
+            color: #fff;
+
+            cursor: pointer;
+            display: inline-block;
+            font-family: -apple-system,system-ui,"Segoe UI","Liberation Sans",sans-serif;
+            font-size: 13px;
+            font-weight: 400;
+            line-height: 1.15385;
+            margin: 10px 0;
+            outline: none;
+            padding: 8px .8em;
+            position: relative;
+            text-align: center;
+            text-decoration: none;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+            vertical-align: baseline;
+            white-space: nowrap;
+            }
+
+            button.export:hover,
+            button.export:focus {
+            background-color: #07c;
+            }
+
+            button.export:focus {
+            box-shadow: 0 0 0 4px rgba(0, 149, 255, .15);
+            }
+
+            button.export:active {
+            background-color: #0064bd;
+            box-shadow: none;
+            }
         </style>
     </head>
     <body>
@@ -108,7 +159,7 @@ app.layout = html.Div([
     html.Div([  
         # Sidebar
         html.Div([  
-            html.H2('Dashboard', style={'color': '#fff', 'text-align': 'center', 'padding': '20px 0'}),  # Title with padding
+            html.H2('Dashboard', style={'color': '#fff', 'text-align': 'center'}),  # Title with padding
 
             html.Hr(style={'border': '1px solid #444', 'margin': '20px 0'}),  # Divider line for separation
 
@@ -165,6 +216,13 @@ address_mapped = pd.read_csv(r'address_mapped.csv', low_memory=False)
 address_mapped['user_id'] = address_mapped['user_id'].astype(str)
 appointment = pd.merge(appointment, address_mapped[['user_id', 'state']], on='user_id', how='left')
 
+# Rename the 'state_y' column to 'state' and drop the 'state_x' column
+appointment['state'] = appointment['state_y']
+appointment.drop(columns=['state_x', 'state_y'], inplace=True)
+
+# Now you should be able to use the 'state' column
+# appointment_with_state = pd.merge(appointment, address_mapped[['user_id', 'state']], on='user_id', how='left')
+
 def home_page():
     return html.Div([
         html.H1("Dashboard Overview", style={'textAlign': 'center'}),
@@ -191,31 +249,24 @@ def home_page():
         ]),
 
         html.Br(),
-
-        # 360 Days Appointment Summary Table
         html.Div([
-            html.H3("360 Days Appointment Summary", style={'textAlign': 'center'}),
-            html.H4(id='summary-date-range', style={'textAlign': 'center'}),  # Display date range
-            dash.dash_table.DataTable(
-                id='summary-table',
-                columns=[
-                    {"name": "User ID", "id": "user_id"},
-                    {"name": "State", "id": "state"},
-                    {"name": "G ID", "id": "g_id"},
-                    {"name": "Complaint", "id": "if_complain"},
-                ],
-                style_table={'overflowX': 'auto'},
-                style_cell={'textAlign': 'left'},
-            )
+            html.H3("State-wise Revenue", style={'textAlign': 'center'}),
+            dcc.Graph(id='state-revenue-chart'),
+        ]),
+
+        # Total Final Summary
+        html.Div([
+            html.H3("Total Final Summary", style={'textAlign': 'center'}),
+            html.Div(id='total-final-summary'),
         ])
     ])
 
-# Callback for updating KPIs, Appointment Summary Chart, and Summary Table
+# Callback to update KPI, Appointment Summary, and Total Final Summary
 @app.callback(
     [Output('home-kpis', 'children'),
      Output('appointment-summary-chart', 'figure'),
-     Output('summary-table', 'data'),
-     Output('summary-date-range', 'children')],  # Output for the dynamic date range
+     Output('total-final-summary', 'children'),  # Output for the new total final summary section
+     Output('state-revenue-chart', 'figure')], 
     [Input('date-picker-range', 'start_date'),
      Input('date-picker-range', 'end_date')]
 )
@@ -234,7 +285,10 @@ def update_home_content(start_date, end_date):
     total_appointments = filtered_data['appointment_id'].nunique()
     total_users = filtered_data['user_id'].nunique()
     avg_days_to_appointment = (filtered_data['appointment_date'].max() - filtered_data['appointment_date'].min()).days
+    total_revenue = filtered_data['total_final'].sum()
 
+    # Format total revenue to two decimal places
+    total_revenue_formatted = f"{total_revenue:.2f}"
     kpis = html.Div([
         html.Div([
             html.H3("Total Appointments"),
@@ -250,10 +304,14 @@ def update_home_content(start_date, end_date):
             html.H3("Avg Days to Appointment"),
             html.P(f"{avg_days_to_appointment}", style={'fontSize': '40px'})
         ], className="card"),
+        html.Div([
+            html.H3("Total Revenue"),
+            html.P(f"${total_revenue_formatted}", style={'fontSize': '40px', 'color': 'green'})
+        ], className="card"),
     ], style={'display': 'flex', 'justify-content': 'space-around'})
 
     # Appointment Summary Chart
-    appointment_summary = filtered_data['status'].value_counts().reset_index()
+    appointment_summary = filtered_data['status'].map(STATUS_MAPPING).value_counts().reset_index()
     appointment_summary.columns = ['Status', 'Count']
 
     chart = px.bar(
@@ -265,29 +323,195 @@ def update_home_content(start_date, end_date):
         color='Status'
     )
 
-    # 360 Days Appointment Summary
-    today = pd.Timestamp.now()
-    last_360_days = today - pd.Timedelta(days=360)
-    print(f"Last 360 days Date: {last_360_days}")
+    state_revenue = filtered_data.groupby('state').agg(
+        Revenue=('total_final', 'sum')  # Summing up the revenue by state
+    ).reset_index()
 
-    # Filter appointments for the last 360 days
-    recent_appointments = appointment[appointment['appointment_date'] >= last_360_days]
-    summary_data = recent_appointments.merge(address_mapped, on='user_id', how='left')[['user_id', 'state', 'g_id', 'if_complain']]
+    # Create a bar chart for revenue by state
+    state_revenue_chart = px.bar(
+        state_revenue,
+        x='state',
+        y='Revenue',
+        title='State-wise Revenue',
+        labels={'state': 'State', 'Revenue': 'Total Revenue'},
+        color='Revenue',  # Optional: Color the bars by revenue
+        height=600  # Optional: Adjust height for better visibility
+    )
 
-    # Update 'if_complain' to Yes/No
-    summary_data['if_complain'] = summary_data['if_complain'].apply(lambda x: 'Yes' if x == 1 else 'No')
-    summary_data = summary_data.drop_duplicates()
+    # Customize the layout
+    state_revenue_chart.update_layout(
+        xaxis_title="State",
+        yaxis_title="Total Revenue",
+        template="plotly_white"  # Optional: Clean layout
+    )
 
-    # Format the date range for the 360 Days Appointment Summary
-    formatted_start_date = last_360_days.strftime('%Y-%m-%d')
-    formatted_end_date = today.strftime('%Y-%m-%d')
-    date_range_text = f"({formatted_start_date} to {formatted_end_date})"
+    # Total Final Summary (G_ID Summary, Complaints, and User State Counts)
+    total_final_summary_data = []
 
-    return kpis, chart, summary_data.to_dict('records'), date_range_text
+    # 1. G_ID Summary based on States and Total Final
+    g_id_summary = filtered_data.groupby(['g_id', 'state']).agg(
+        Revenue=('total_final', 'sum'), 
+        Appointment_Count=('appointment_id', 'size')  # Count of appointments for each g_id and state
+    ).reset_index()
+    g_id_summary['Revenue'] = g_id_summary['Revenue'].apply(lambda x: f"{x:.2f}")
+    # Update the DataTable to show Revenue and Appointment Count
+    g_id_summary_table = dash.dash_table.DataTable(
+        id='g-id-summary-table',
+        columns=[
+            {"name": "G_ID", "id": "g_id"},
+            {"name": "State", "id": "state"},
+            {"name": "Revenue", "id": "Revenue"},
+            {"name": "Appointment Count", "id": "Appointment_Count"}
+        ],
+        data=g_id_summary.to_dict('records'),
+        style_table={'overflowX': 'auto'},
+        style_cell={'textAlign': 'left'}
+    )
+
+
+    # 2. G_ID Complaints based on States
+    if 'if_complain' in filtered_data.columns:
+        filtered_data['if_complain'] = filtered_data['if_complain'].map({'Yes': 1, 'No': 0}).fillna(0)
+
+    if 'if_complain' in filtered_data.columns and not filtered_data.empty:
+        g_id_complaints = filtered_data[filtered_data['if_complain'] == 1].groupby(['g_id', 'state']).size().reset_index(name='Complaints')
+    else:
+        g_id_complaints = pd.DataFrame(columns=['G_ID', 'State', 'Complaints'])
+
+
+    g_id_complaints_table = dash.dash_table.DataTable(
+        id='g-id-complaints-table',
+        columns=[{"name": col, "id": col} for col in g_id_complaints.columns],
+        data=g_id_complaints.to_dict('records'),
+        style_table={'overflowX': 'auto'},
+        style_cell={'textAlign': 'left'},
+    )
+
+    # 3. Total Count of Users by State
+    user_state_count = filtered_data.groupby('state')['user_id'].nunique().reset_index()
+    user_state_count.columns = ['State', 'User Count']
+    user_state_count_table = dash.dash_table.DataTable(
+        id='user-state-count-table',
+        columns=[{"name": col, "id": col} for col in user_state_count.columns],
+        data=user_state_count.to_dict('records'),
+        style_table={'overflowX': 'auto'},
+        style_cell={'textAlign': 'left'}
+    )
+
+    # Combine all three tables into the "Total Final Summary"
+    total_final_summary_data.append(html.Div([
+        html.H4("G_ID Summary by State and Total Final", style={'textAlign': 'center', 'marginBottom': '10px'}),  # Table Title
+        dash.dash_table.DataTable(
+            id='g-id-summary-table',
+            columns=[{"name": col, "id": col} for col in g_id_summary.columns],
+            data=g_id_summary.to_dict('records'),
+            style_table={'overflowX': 'auto'},  # Enables horizontal scrolling
+            style_cell={
+                'textAlign': 'center',  # Center align all text
+                'padding': '10px',     # Add padding for better spacing
+                'fontFamily': 'Arial',  # Use a clean, professional font
+                'fontSize': '14px'
+            },
+            style_header={
+                'backgroundColor': '#4CAF50',  # Header background color
+                'color': 'white',             # Header text color
+                'fontWeight': 'bold',         # Bold header text
+                'textAlign': 'center'         # Center align header text
+            },
+            style_data={
+                'backgroundColor': '#f9f9f9',  # Data row background color
+                'border': '1px solid #ddd',   # Cell borders
+            },
+            style_data_conditional=[
+                {
+                    'if': {'row_index': 'odd'},  # Apply styles to odd rows
+                    'backgroundColor': '#f2f2f2',
+                },
+                {
+                    'if': {'state': 'active'},  # Highlight the active row (hover or selection)
+                    'backgroundColor': '#d1e7dd',
+                    'border': '1px solid #0f5132',
+                    'color': '#0f5132',
+                }
+            ],
+            export_format='csv',  # Enable export to CSV
+            export_headers='display',
+        )
+    ], style={'marginBottom': '30px'}))  # Add spacing below the table
+
+    # Repeat similar enhancements for other tables (G_ID Complaints, Total User Count)
+    total_final_summary_data.append(html.Div([
+        html.H4("G_ID Complaints by State", style={'textAlign': 'center', 'marginBottom': '10px'}),
+        dash.dash_table.DataTable(
+            id='g-id-complaints-table',
+            columns=[{"name": col, "id": col} for col in g_id_complaints.columns],
+            data=g_id_complaints.to_dict('records'),
+            style_table={'overflowX': 'auto'},
+            style_cell={
+                'textAlign': 'left',
+                'padding': '10px',
+                'fontFamily': 'Arial',
+                'fontSize': '14px'
+            },
+            style_header={
+                'backgroundColor': '#007bff',
+                'color': 'white',
+                'fontWeight': 'bold',
+                'textAlign': 'center'
+            },
+            style_data={
+                'backgroundColor': '#fff',
+                'border': '1px solid #ddd',
+            },
+            style_data_conditional=[
+                {
+                    'if': {'row_index': 'odd'},
+                    'backgroundColor': '#f2f2f2',
+                }
+            ],
+            export_format='csv',
+            export_headers='display',
+        )
+    ]))
+
+    total_final_summary_data.append(html.Div([
+        html.H4("Total User Count by State", style={'textAlign': 'center', 'marginBottom': '10px'}),
+        dash.dash_table.DataTable(
+            id='user-state-count-table',
+            columns=[{"name": col, "id": col} for col in user_state_count.columns],
+            data=user_state_count.to_dict('records'),
+            style_table={'overflowX': 'auto'},
+            style_cell={
+                'textAlign': 'left',
+                'padding': '10px',
+                'fontFamily': 'Arial',
+                'fontSize': '14px'
+            },
+            style_header={
+                'backgroundColor': '#343a40',
+                'color': 'white',
+                'fontWeight': 'bold',
+                'textAlign': 'center'
+            },
+            style_data={
+                'backgroundColor': '#f8f9fa',
+                'border': '1px solid #ddd',
+            },
+            style_data_conditional=[
+                {
+                    'if': {'row_index': 'odd'},
+                    'backgroundColor': '#e9ecef',
+                }
+            ],
+            export_format='csv',
+            export_headers='display',
+        )
+    ]))
+
+    return kpis, chart, html.Div(total_final_summary_data), state_revenue_chart
 
 
 # ----------------- Page 2: User Status Analysis -----------------
-appointment_with_state = pd.merge(appointment, address_mapped[['user_id', 'state']], on='user_id', how='left')
 
 def user_status_page():
     return html.Div([
@@ -297,7 +521,7 @@ def user_status_page():
         html.Label("Filter by State:"),
         dcc.Dropdown(
             id='state-dropdown',
-            options=[{'label': state, 'value': state} for state in appointment_with_state['state'].unique()],
+            options=[{'label': state, 'value': state} for state in appointment['state'].unique()],
             value=None,
             placeholder="Select a state"
         ),
@@ -325,7 +549,7 @@ def update_user_chart(selected_state, selected_status):
 
     if selected_state:
         # Filter users by the selected state from the pre-merged data
-        state_user_ids = appointment_with_state[appointment_with_state['state'] == selected_state]['user_id']
+        state_user_ids = appointment[appointment['state'] == selected_state]['user_id']
         filtered_users = filtered_users[filtered_users['user_id'].isin(state_user_ids)]
 
     # Filter by user status
