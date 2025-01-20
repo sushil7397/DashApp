@@ -261,7 +261,12 @@ def home_page():
             html.H3("State-wise Revenue", style={'textAlign': 'center'}),
             dcc.Graph(id='state-revenue-chart'),
         ]),
+        html.Div([
+            html.H3("Complaints by G_ID", style={'textAlign': 'center'}),
+            dcc.Graph(id='complaints-chart'),
+        ]),
 
+        html.Br(),
         # Total Final Summary
         html.Div([
             html.H3("Total Final Summary", style={'textAlign': 'center'}),
@@ -273,6 +278,7 @@ def home_page():
 @app.callback(
     [Output('home-kpis', 'children'),
      Output('appointment-summary-chart', 'figure'),
+     Output('complaints-chart', 'figure'),
      Output('total-final-summary', 'children'),  # Output for the new total final summary section
      Output('state-revenue-chart', 'figure')], 
     [Input('date-picker-range', 'start_date'),
@@ -293,7 +299,12 @@ def update_home_content(start_date, end_date):
     total_appointments = filtered_data['appointment_id'].nunique()
     total_users = filtered_data['user_id'].nunique()
     avg_days_to_appointment = (filtered_data['appointment_date'].max() - filtered_data['appointment_date'].min()).days
+
+    filtered_data['total_final'] = pd.to_numeric(filtered_data['total_final'], errors='coerce')
+    print(filtered_data['total_final'].sum())
     total_revenue = filtered_data['total_final'].sum()
+    print(filtered_data['total_final'].head())
+    print(filtered_data['total_final'].sum())
 
     # Format total revenue to two decimal places
     total_revenue_formatted = f"{total_revenue:.2f}"
@@ -329,6 +340,39 @@ def update_home_content(start_date, end_date):
         title='Summary of Appointments by Status',
         labels={'Status': 'Appointment Status', 'Count': 'Number of Appointments'},
         color='Status'
+    )
+    filtered_data['if_complain'] = filtered_data['if_complain'].map({'Yes': 1, 'No': 0}).fillna(0)
+
+    # Filter for complaints where 'if_complain' equals 1
+    complaints_data = (
+        filtered_data[filtered_data['if_complain'] == 1]
+        .groupby('g_id')
+        .size()
+        .reset_index(name='Complaint Count')
+    )
+
+    # Ensure there is data for the chart
+    if complaints_data.empty:
+        complaints_data = pd.DataFrame({'g_id': [], 'Complaint Count': []})
+
+    # Generate a bar chart for complaints
+    complaints_chart = px.bar(
+        complaints_data,
+        x='g_id',
+        y='Complaint Count',
+        title='Complaints by G_ID',
+        labels={'g_id': 'G_ID', 'Complaint Count': 'Number of Complaints'},
+        color='Complaint Count',  # Optional: Color the bars by complaint count
+        height=600
+    )
+
+    # Customize chart layout
+    complaints_chart.update_layout(
+        xaxis_title="G_ID",
+        yaxis_title="Number of Complaints",
+        template="plotly_white",  # Use a clean and modern template
+        coloraxis_showscale=False,  # Hide the color scale for simplicity
+        font=dict(size=12),
     )
 
     state_revenue = filtered_data.groupby('state').agg(
@@ -516,7 +560,7 @@ def update_home_content(start_date, end_date):
         )
     ]))
 
-    return kpis, chart, html.Div(total_final_summary_data), state_revenue_chart
+    return kpis, chart,complaints_chart, html.Div(total_final_summary_data), state_revenue_chart
 
 
 # ----------------- Page 2: User Status Analysis -----------------
@@ -544,12 +588,19 @@ def user_status_page():
 
         # User Status Distribution Chart
         dcc.Graph(id='user-status-chart'),
+
+        # Export Button
+        html.Button('Export User Data', id='export-button', n_clicks=0),
+        
+        # Hidden Div to trigger download
+        dcc.Download(id="download-user-data")
     ])
+
 
 @app.callback(
     Output('user-status-chart', 'figure'),
     [Input('state-dropdown', 'value'),
-     Input('user-status-dropdown', 'value')]
+     Input('user-status-dropdown', 'value')],
 )
 def update_user_chart(selected_state, selected_status):
     # Filter users based on the state dropdown
@@ -576,6 +627,58 @@ def update_user_chart(selected_state, selected_status):
         title="User Distribution by Status",
         labels={'user_status': 'User Status', 'count': 'User Count'}
     )
+from joblib import Parallel, delayed
+import multiprocessing
+@app.callback(
+    Output("download-user-data", "data"),
+    [Input('export-button', 'n_clicks'),
+     Input('state-dropdown', 'value'),
+     Input('user-status-dropdown', 'value')]
+)
+def export_user_data(n_clicks, selected_state, selected_status):
+    if n_clicks > 0:
+        # Apply filters directly on appointment to reduce data size early
+        filtered_appointments = appointment.copy()
+
+        if selected_state:
+            filtered_appointments = filtered_appointments[filtered_appointments['state'] == selected_state]
+
+        if selected_status != 'All':
+            user_ids = user_data[user_data['user_status'] == selected_status]['user_id']
+            filtered_appointments = filtered_appointments[filtered_appointments['user_id'].isin(user_ids)]
+
+        # Group data by user_id
+        grouped_appointments = filtered_appointments.groupby('user_id')
+
+        # Parallel processing for detailed export data
+        def process_user_data(user_id, group):
+            return {
+                'user_id': user_id,
+                'g_ids': ', '.join(group['g_id'].unique().astype(str)),
+                'total_appointments': group['appointment_id'].count(),
+                'appointment_dates': ', '.join(group['appointment_date'].dt.strftime('%Y-%m-%d %H:%M')),
+                'Appointment_status': ', '.join(group['status']),
+                'user_status': group['user_status'].iloc[0] if 'user_status' in group.columns else 'Unknown',
+                'state': group['state'].iloc[0] if 'state' in group.columns else 'Unknown',
+                'total_final_sum': group['total_final'].sum()
+            }
+
+        # Determine number of available CPU cores
+        num_cores = multiprocessing.cpu_count()
+
+        detailed_data = Parallel(n_jobs=num_cores)(
+            delayed(process_user_data)(user_id, group) for user_id, group in grouped_appointments
+        )
+
+        # Create a DataFrame from parallel results
+        export_df = pd.DataFrame(detailed_data)
+
+        # Create a downloadable CSV
+        return dcc.send_data_frame(
+            export_df.to_csv,
+            filename="detailed_user_data.csv",
+            index=False
+        )
 
 # ----------------- Page 3: Appointment Analysis -----------------
 def appointment_analysis_page():
