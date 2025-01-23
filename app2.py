@@ -473,10 +473,7 @@ def update_home_content(start_date, end_date):
         title="Heatmap: G_IDs Close to Users by Zip Code",
         color_continuous_scale="Viridis"
     )
-    state_user_g_id_data = filtered_data.groupby('state').agg({
-        'user_id': list,
-        'g_id': list
-    }).reset_index()
+
 
     state_names = {
         "AL": "Alabama",
@@ -519,29 +516,39 @@ def update_home_content(start_date, end_date):
         "WA": "Washington",
         "WY": "Wyoming",
     }
+    new_filtered_data = pd.merge(filtered_data, address_mapped[['user_id', 'zip']], on='user_id', how='left')
 
-    state_coordinates = (
-        address_mapped.groupby('state')[['latitude', 'longitude']]
+    # Extract ZIP, Latitude, and Longitude
+    zip_coordinates = (
+        address_mapped.groupby('zip')[['latitude', 'longitude']]
         .mean()
         .dropna()  # Ensure no missing values
         .reset_index()
-        .set_index('state')
+        .set_index('zip')
         .to_dict('index')
     )
-    state_coordinates = {
-        state: (coords['latitude'], coords['longitude'])
-        for state, coords in state_coordinates.items()
+    zip_coordinates = {
+        zip_code: (coords['latitude'], coords['longitude'])
+        for zip_code, coords in zip_coordinates.items()
     }
 
-    markers = []
+        # Process each ZIP and associated user_ids and g_ids
+    zip_user_g_id_data = new_filtered_data.groupby('zip').agg({
+        'user_id': list,
+        'g_id': list
+    }).reset_index()
 
-    # Process each state and user_ids
-    for state, user_ids, g_ids in zip(state_user_g_id_data['state'], state_user_g_id_data['user_id'], state_user_g_id_data['g_id']):
-        if state in state_coordinates:
+    markers = []
+    for zip_code, user_ids, g_ids in zip(zip_user_g_id_data['zip'], zip_user_g_id_data['user_id'], zip_user_g_id_data['g_id']):
+        if zip_code in zip_coordinates:
             # Remove duplicates and filter out NaN values
             distinct_user_ids = sorted(set(filter(lambda x: x == x, user_ids)))  # Filter NaN and deduplicate
             distinct_g_ids = sorted(set(filter(lambda x: x == x, g_ids)))  # Filter NaN and deduplicate
             user_id_count = len(distinct_user_ids)
+
+            # Get the state abbreviation from the ZIP code (assuming it's in address_mapped)
+            state_abbr = address_mapped[address_mapped['zip'] == zip_code]['state'].iloc[0]  # Extract state abbreviation for the ZIP code
+            state_name = state_names.get(state_abbr, 'Unknown State')  # Map state abbreviation to full state name
 
             # Prepare display strings for user_ids and g_ids
             if user_id_count == 0:
@@ -554,34 +561,35 @@ def update_home_content(start_date, end_date):
             # Add marker to the list
             markers.append(
                 dl.Marker(
-                    position=state_coordinates[state],
+                    position=zip_coordinates[zip_code],
                     children=[
                         dl.Popup(f"""
-                        State: {state_names.get(state, 'Unknown State')}<br>
-                        User ID Count: {user_id_count}<br>
-                        {user_ids_str}<br>
-                        {g_ids_str}
+                        ZIP: {zip_code}
+                        State: {state_name} 
+                        User ID Count: {user_id_count}
+                        user ids:{user_ids_str}
+                        g_ids:{g_ids_str}
                         """)
                     ],
                 )
             )
 
-    # Create the map with the updated user_id and g_id data
+    # Create the map with ZIP code-based markers
     google_map_chart = dl.Map(
         children=[
             dl.TileLayer(),  # Base layer for the map
             dl.LayerGroup(markers),
         ],
-        center=[37.0902, -95.7129],  # US center coordinates
+        center=[37.0902, -95.7129],  # Center the map (US coordinates)
         zoom=4,
         style={'height': '600px', 'width': '100%'},
     )
+
     # Return the map along with other KPIs and charts
     return kpis, chart, complaints_chart, state_revenue_chart, heatmap, google_map_chart
 
 
 # ----------------- Page 2: User Status Analysis -----------------
-
 def user_status_page():
     return html.Div([
         html.H1("User Status Analysis", style={'textAlign': 'center'}),
