@@ -77,7 +77,7 @@ def classify_user(days):
     else:
         return 'Recurring'
 
-user_last_appointment['user_status'] = user_last_appointment['days_since_last_appointment'].apply(classify_user)
+user_last_appointment['status'] = user_last_appointment['days_since_last_appointment'].apply(classify_user)
 
 # Merge classification back to user data
 user_data = pd.merge(user_last_appointment, user, on='user_id', how='left')
@@ -638,19 +638,19 @@ def update_user_chart(selected_state, selected_status):
 
     # Filter by user status
     if selected_status != 'All':
-        filtered_users = filtered_users[filtered_users['user_status'] == selected_status]
+        filtered_users = filtered_users[filtered_users['status'] == selected_status]
 
     # Count the user status occurrences
-    status_counts = filtered_users['user_status'].value_counts().reset_index()
-    status_counts.columns = ['user_status', 'count']
+    status_counts = filtered_users['status'].value_counts().reset_index()
+    status_counts.columns = ['status', 'count']
 
     # Create a bar chart
     return px.bar(
         status_counts,
-        x='user_status',
+        x='status',
         y='count',
         title="User Distribution by Status",
-        labels={'user_status': 'User Status', 'count': 'User Count'}
+        labels={'status': 'User Status', 'count': 'User Count'}
     )
 from joblib import Parallel, delayed
 import multiprocessing
@@ -669,24 +669,41 @@ def export_user_data(n_clicks, selected_state, selected_status):
             filtered_appointments = filtered_appointments[filtered_appointments['state'] == selected_state]
 
         if selected_status != 'All':
-            user_ids = user_data[user_data['user_status'] == selected_status]['user_id']
+            user_ids = user_data[user_data['status'] == selected_status]['user_id']
             filtered_appointments = filtered_appointments[filtered_appointments['user_id'].isin(user_ids)]
 
         # Group data by user_id
         grouped_appointments = filtered_appointments.groupby('user_id')
 
         # Parallel processing for detailed export data
+        # Updated function to process user data
         def process_user_data(user_id, group):
+            # Count different user statuses
+            status_counts = group['status'].value_counts().to_dict()
+            count_p = status_counts.get('P', 0)  # Potential
+            count_c = status_counts.get('C', 0)  # Confirmed
+            count_l = status_counts.get('L', 0)  # Lost
+            count_all = group['status'].nunique()  # Unique statuses in the group
+
+            # Count unique g_ids
+            unique_g_ids = len(group['g_id'].unique())
+
             return {
                 'user_id': user_id,
                 'g_ids': ', '.join(group['g_id'].unique().astype(str)),
+                'unique_g_ids': unique_g_ids,  # New column
                 'total_appointments': group['appointment_id'].count(),
                 'appointment_dates': ', '.join(group['appointment_date'].dt.strftime('%Y-%m-%d %H:%M')),
                 'Appointment_status': ', '.join(group['status']),
-                'user_status': group['user_status'].iloc[0] if 'user_status' in group.columns else 'Unknown',
+                'count_P': count_p,  # New column
+                'count_C': count_c,  # New column
+                'count_L': count_l,  # New column
+                'count_All_Statuses': count_all,  # New column
+                'status': group['status'].iloc[0] if 'status' in group.columns else 'Unknown',
                 'state': group['state'].iloc[0] if 'state' in group.columns else 'Unknown',
                 'total_final_sum': group['total_final'].sum()
             }
+
 
         # Determine number of available CPU cores
         num_cores = multiprocessing.cpu_count()
