@@ -101,7 +101,7 @@ app.index_string = '''
                 padding: 0;
                 background-color: #f4f4f4;
             }
-            button.export {
+           button#export-table-g-id-complaints,button#export-table-g-id-summary,button#export-table-user-state-count {
             background-color: rgba(68, 68, 68, 0.7);
             border: 1px solid transparent;
             border-radius: 3px;
@@ -128,16 +128,16 @@ app.index_string = '''
             white-space: nowrap;
             }
 
-            button.export:hover,
-            button.export:focus {
+           button#export-table-g-id-complaints,button#export-table-g-id-summary,button#export-table-user-state-count:hover,
+           button#export-table-g-id-complaints,button#export-table-g-id-summary,button#export-table-user-state-count:focus {
             background-color: #07c;
             }
 
-            button.export:focus {
+           button#export-table-g-id-complaints,button#export-table-g-id-summary,button#export-table-user-state-count:focus {
             box-shadow: 0 0 0 4px rgba(0, 149, 255, .15);
             }
 
-            button.export:active {
+           button#export-table-g-id-complaints,button#export-table-g-id-summary,button#export-table-user-state-count:active {
             background-color: #0064bd;
             box-shadow: none;
             }
@@ -737,98 +737,40 @@ def total_final_summary_page():
             display_format='YYYY-MM-DD',
             style={'margin-bottom': '20px'}
         ),
-        # Total Final Summary
-        html.Div([
-            html.H3("Total Final Summary", style={'textAlign': 'center'}),
-            html.Div(id='total-final-summary'),
-        ])
+
+        # Total Final Summary Section
+        html.Div(id='total-final-summary'),
     ])
 
-# Callback to update KPI, Appointment Summary, and Total Final Summary
+
 @app.callback(
     [Output('total-final-summary', 'children')],
     [Input('date-picker-range', 'start_date'),
      Input('date-picker-range', 'end_date')]
 )
 def update_home_content(start_date, end_date):
-    # Convert to datetime
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
-
-    # Filter appointments based on date range
     filtered_data = appointment[
         (appointment['appointment_date'] >= start_date) &
         (appointment['appointment_date'] <= end_date)
     ]
 
-    filtered_data['total_final'] = pd.to_numeric(filtered_data['total_final'], errors='coerce')
-    total_revenue = filtered_data['total_final'].sum()
-    # Appointment Summary Chart
-    appointment_summary = filtered_data['status'].map(STATUS_MAPPING).value_counts().reset_index()
-    appointment_summary.columns = ['Status', 'Count']
-
-    filtered_data['if_complain'] = filtered_data['if_complain'].map({'Yes': 1, 'No': 0}).fillna(0)
-    # Total Final Summary (G_ID Summary, Complaints, and User State Counts)
     total_final_summary_data = []
 
-    # 1. G_ID Summary based on States and Total Final
+    # G_ID Summary Table
     g_id_summary = filtered_data.groupby(['g_id', 'state']).agg(
-        Revenue=('total_final', 'sum'), 
-        Appointment_Count=('appointment_id', 'size')  # Count of appointments for each g_id and state
+        Revenue=('total_final', 'sum'),
+        Appointment_Count=('appointment_id', 'size')
     ).reset_index()
-    g_id_summary['Revenue'] = g_id_summary['Revenue'].apply(lambda x: f"{x:.2f}")
-    # Update the DataTable to show Revenue and Appointment Count
-    g_id_summary_table = dash.dash_table.DataTable(
-        id='g-id-summary-table',
-        columns=[
-            {"name": "G_ID", "id": "g_id"},
-            {"name": "State", "id": "state"},
-            {"name": "Revenue", "id": "Revenue"},
-            {"name": "Appointment Count", "id": "Appointment_Count"}
-        ],
-        data=g_id_summary.to_dict('records'),
-        style_table={'overflowX': 'auto'},
-        style_cell={'textAlign': 'left'}
-    )
-
-
-    # 2. G_ID Complaints based on States
-    if 'if_complain' in filtered_data.columns:
-        filtered_data['if_complain'] = filtered_data['if_complain'].map({'Yes': 1, 'No': 0}).fillna(0)
-
-    if 'if_complain' in filtered_data.columns and not filtered_data.empty:
-        g_id_complaints = filtered_data[filtered_data['if_complain'] == 1].groupby(['g_id', 'state']).size().reset_index(name='Complaints')
-    else:
-        g_id_complaints = pd.DataFrame(columns=['G_ID', 'State', 'Complaints'])
-
-
-    g_id_complaints_table = dash.dash_table.DataTable(
-        id='g-id-complaints-table',
-        columns=[{"name": col, "id": col} for col in g_id_complaints.columns],
-        data=g_id_complaints.to_dict('records'),
-        style_table={'overflowX': 'auto'},
-        style_cell={'textAlign': 'left'},
-    )
-
-    # 3. Total Count of Users by State
-    user_state_count = filtered_data.groupby('state')['user_id'].nunique().reset_index()
-    user_state_count.columns = ['State', 'User Count']
-    user_state_count_table = dash.dash_table.DataTable(
-        id='user-state-count-table',
-        columns=[{"name": col, "id": col} for col in user_state_count.columns],
-        data=user_state_count.to_dict('records'),
-        style_table={'overflowX': 'auto'},
-        style_cell={'textAlign': 'left'}
-    )
-
-    # Combine all three tables into the "Total Final Summary"
     total_final_summary_data.append(html.Div([
-        html.H4("G_ID Summary by State and Total Final", style={'textAlign': 'center', 'marginBottom': '10px'}),  # Table Title
+        html.H4("G_ID Summary", style={'textAlign': 'center'}),
+        html.Button('Export G_ID Summary', id='export-table-g-id-summary', n_clicks=0),
+        dcc.Download(id="download-table-g-id-summary"),
         dash.dash_table.DataTable(
-            id='g-id-summary-table',
             columns=[{"name": col, "id": col} for col in g_id_summary.columns],
             data=g_id_summary.to_dict('records'),
-            style_table={'overflowX': 'auto'},  # Enables horizontal scrolling
+            style_table={'overflowX': 'auto'},
             style_cell={
                 'textAlign': 'center',  # Center align all text
                 'padding': '10px',     # Add padding for better spacing
@@ -857,81 +799,168 @@ def update_home_content(start_date, end_date):
                     'color': '#0f5132',
                 }
             ],
-            export_format='csv',  # Enable export to CSV
-            export_headers='display',
         )
-    ], style={'marginBottom': '30px'}))  # Add spacing below the table
+    ], style={'marginBottom': '30px'}))
 
-    # Repeat similar enhancements for other tables (G_ID Complaints, Total User Count)
+    # G_ID Complaints Table
+    filtered_data['if_complain'] = filtered_data['if_complain'].map({'Yes': 1, 'No': 0})
+        
+        # Filter for complaints (where 'if_complain' is 1)
+    complaints_data = filtered_data[filtered_data['if_complain'] == 1]
+    g_id_complaints = complaints_data.groupby(['g_id', 'state']).size().reset_index(name='Complaints')
     total_final_summary_data.append(html.Div([
-        html.H4("G_ID Complaints by State", style={'textAlign': 'center', 'marginBottom': '10px'}),
+        html.H4("G_ID Complaints", style={'textAlign': 'center'}),
+        html.Button('Export G_ID Complaints', id='export-table-g-id-complaints', n_clicks=0),
+        dcc.Download(id="download-table-g-id-complaints"),
         dash.dash_table.DataTable(
-            id='g-id-complaints-table',
             columns=[{"name": col, "id": col} for col in g_id_complaints.columns],
             data=g_id_complaints.to_dict('records'),
             style_table={'overflowX': 'auto'},
             style_cell={
-                'textAlign': 'left',
-                'padding': '10px',
-                'fontFamily': 'Arial',
+                'textAlign': 'center',  # Center align all text
+                'padding': '10px',     # Add padding for better spacing
+                'fontFamily': 'Arial',  # Use a clean, professional font
                 'fontSize': '14px'
             },
             style_header={
-                'backgroundColor': '#007bff',
-                'color': 'white',
-                'fontWeight': 'bold',
-                'textAlign': 'center'
+                'backgroundColor': '#4CAF50',  # Header background color
+                'color': 'white',             # Header text color
+                'fontWeight': 'bold',         # Bold header text
+                'textAlign': 'center'         # Center align header text
             },
             style_data={
-                'backgroundColor': '#fff',
-                'border': '1px solid #ddd',
+                'backgroundColor': '#f9f9f9',  # Data row background color
+                'border': '1px solid #ddd',   # Cell borders
             },
             style_data_conditional=[
                 {
-                    'if': {'row_index': 'odd'},
+                    'if': {'row_index': 'odd'},  # Apply styles to odd rows
                     'backgroundColor': '#f2f2f2',
+                },
+                {
+                    'if': {'state': 'active'},  # Highlight the active row (hover or selection)
+                    'backgroundColor': '#d1e7dd',
+                    'border': '1px solid #0f5132',
+                    'color': '#0f5132',
                 }
             ],
-            export_format='csv',
-            export_headers='display',
         )
-    ]))
+    ], style={'marginBottom': '30px'}))
 
+    # User State Count Table
+    user_state_count = filtered_data.groupby('state')['user_id'].nunique().reset_index()
+    user_state_count.columns = ['State', 'User Count']
     total_final_summary_data.append(html.Div([
-        html.H4("Total User Count by State", style={'textAlign': 'center', 'marginBottom': '10px'}),
+        html.H4("User State Count", style={'textAlign': 'center'}),
+        html.Button('Export User State Count', id='export-table-user-state-count', n_clicks=0),
+        dcc.Download(id="download-table-user-state-count"),
         dash.dash_table.DataTable(
-            id='user-state-count-table',
             columns=[{"name": col, "id": col} for col in user_state_count.columns],
             data=user_state_count.to_dict('records'),
             style_table={'overflowX': 'auto'},
             style_cell={
-                'textAlign': 'left',
-                'padding': '10px',
-                'fontFamily': 'Arial',
+                'textAlign': 'center',  # Center align all text
+                'padding': '10px',     # Add padding for better spacing
+                'fontFamily': 'Arial',  # Use a clean, professional font
                 'fontSize': '14px'
             },
             style_header={
-                'backgroundColor': '#343a40',
-                'color': 'white',
-                'fontWeight': 'bold',
-                'textAlign': 'center'
+                'backgroundColor': '#4CAF50',  # Header background color
+                'color': 'white',             # Header text color
+                'fontWeight': 'bold',         # Bold header text
+                'textAlign': 'center'         # Center align header text
             },
             style_data={
-                'backgroundColor': '#f8f9fa',
-                'border': '1px solid #ddd',
+                'backgroundColor': '#f9f9f9',  # Data row background color
+                'border': '1px solid #ddd',   # Cell borders
             },
             style_data_conditional=[
                 {
-                    'if': {'row_index': 'odd'},
-                    'backgroundColor': '#e9ecef',
+                    'if': {'row_index': 'odd'},  # Apply styles to odd rows
+                    'backgroundColor': '#f2f2f2',
+                },
+                {
+                    'if': {'state': 'active'},  # Highlight the active row (hover or selection)
+                    'backgroundColor': '#d1e7dd',
+                    'border': '1px solid #0f5132',
+                    'color': '#0f5132',
                 }
             ],
-            export_format='csv',
-            export_headers='display',
         )
-    ]))
+    ], style={'marginBottom': '30px'}))
 
     return [html.Div(total_final_summary_data)]
+
+
+@app.callback(
+    Output("download-table-g-id-summary", "data"),
+    [Input("export-table-g-id-summary", "n_clicks"),
+     Input('date-picker-range', 'start_date'),
+     Input('date-picker-range', 'end_date')]
+)
+def export_table_g_id_summary(n_clicks, start_date, end_date):
+    if n_clicks > 0:
+        start_date = pd.to_datetime(start_date)
+        end_date = pd.to_datetime(end_date)
+        filtered_data = appointment[
+            (appointment['appointment_date'] >= start_date) &
+            (appointment['appointment_date'] <= end_date)
+        ]
+        g_id_summary = filtered_data.groupby(['g_id', 'state']).agg(
+            Revenue=('total_final', 'sum'),
+            Appointment_Count=('appointment_id', 'size')
+        ).reset_index()
+        return dcc.send_data_frame(g_id_summary.to_csv, filename="g_id_summary_table.csv", index=False)
+
+
+@app.callback(
+    Output("download-table-g-id-complaints", "data"),
+    [Input("export-table-g-id-complaints", "n_clicks"),
+     Input('date-picker-range', 'start_date'),
+     Input('date-picker-range', 'end_date')]
+)
+def export_table_g_id_complaints(n_clicks, start_date, end_date):
+    if n_clicks > 0:
+        start_date = pd.to_datetime(start_date)
+        end_date = pd.to_datetime(end_date)
+        
+        # Filter appointments within the date range
+        filtered_data = appointment[
+            (appointment['appointment_date'] >= start_date) &
+            (appointment['appointment_date'] <= end_date)
+        ]
+        
+        # Map 'Yes' to 1 and 'No' to 0 in the 'if_complain' column
+        filtered_data['if_complain'] = filtered_data['if_complain'].map({'Yes': 1, 'No': 0})
+        
+        # Filter for complaints (where 'if_complain' is 1)
+        complaints_data = filtered_data[filtered_data['if_complain'] == 1]
+        
+        # Group by 'g_id' and 'state', then count complaints
+        g_id_complaints = complaints_data.groupby(['g_id', 'state']).size().reset_index(name='Complaints')
+        
+        # Return CSV for download
+        return dcc.send_data_frame(g_id_complaints.to_csv, filename="g_id_complaints_table.csv", index=False)
+
+
+@app.callback(
+    Output("download-table-user-state-count", "data"),
+    [Input("export-table-user-state-count", "n_clicks"),
+     Input('date-picker-range', 'start_date'),
+     Input('date-picker-range', 'end_date')]
+)
+def export_table_user_state_count(n_clicks, start_date, end_date):
+    if n_clicks > 0:
+        start_date = pd.to_datetime(start_date)
+        end_date = pd.to_datetime(end_date)
+        filtered_data = appointment[
+            (appointment['appointment_date'] >= start_date) &
+            (appointment['appointment_date'] <= end_date)
+        ]
+        user_state_count = filtered_data.groupby('state')['user_id'].nunique().reset_index()
+        user_state_count.columns = ['State', 'User Count']
+        return dcc.send_data_frame(user_state_count.to_csv, filename="user_state_count_table.csv", index=False)
+
 
 # ----------------- Page 4: Appointment Analysis -----------------
 def appointment_analysis_page():
