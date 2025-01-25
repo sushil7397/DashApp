@@ -1180,4 +1180,4 @@ def display_page(pathname):
 
 # ----------------- Run the App -----------------
 if __name__ == '__main__':
-    app.run_server(host='70.36.107.109',debug=True)
+    app.run_server(debug=True)
