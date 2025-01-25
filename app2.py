@@ -939,7 +939,6 @@ def export_table_g_id_complaints(n_clicks, start_date, end_date):
         # Group by 'g_id' and 'state', then count complaints
         g_id_complaints = complaints_data.groupby(['g_id', 'state']).size().reset_index(name='Complaints')
         
-        # Return CSV for download
         return dcc.send_data_frame(g_id_complaints.to_csv, filename="g_id_complaints_table.csv", index=False)
 
 
